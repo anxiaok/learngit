@@ -1,9 +1,24 @@
+<!--
+    使用组件说明：
+        1，local_name:文件原始名字
+        2，random_name:文件随机名字
+
+    如何调用：
+        <plup-load :browse_button="'addAppendix'" @getImgList_addAppendix = "getImgList_addAppendix" :type="'getImgList_addAppendix'"></plup-load>
+
+        1,browse_button:触发按钮
+        2，@getImgList_addAppendix = "getImgList_addAppendix"：触发事件
+        3，:type="'getImgList_addAppendix'"：触发类型，
+    注意：
+        1，browse_button一定是能找到dom
+
+-->
 <template>
     <div style="display: none">
         <form name=theform>
             <!--可以设置不同的文件名上传-->
-            <input type="radio" name="myradio" value="local_name" /> 上传文件名字保持本地文件名字
-            <input type="radio" name="myradio" value="random_name" checked=true/> 上传文件名字是随机文件名
+            <input type="radio" name="myradio" value="local_name" checked=true/> 上传文件名字保持本地文件名字
+            <input type="radio" name="myradio" value="random_name" /> 上传文件名字是随机文件名
             <br/>
             上传到指定目录:<input type="text" id='dirname' placeholder="如果不填，默认是上传到根目录" size=50>
         </form>
@@ -14,11 +29,12 @@
     export default{
         props:{
             browse_button: '',
-            type:''
+            type:'',
+            dropBtn:''
         },
         data(){
             return {
-                token:this.$route.query.token,
+                token:this.$cookie.get('token'),
                 parames:'', // 后台返回的直传签名
                 accessid: '', // 全局OSSAccessKeyId
                 host : '', // 后台返回的host
@@ -36,7 +52,7 @@
             plupload
         },
         mounted(){
-            this.getSign();
+            this.initPlupLoad();
         },
         methods: {
             // 从后台获取asign
@@ -137,11 +153,18 @@
                     'callback' : this.callbackbody,
                     'signature': this.signature,
                 };
-
-                up.setOption({
-                    'url': this.host,
-                    'multipart_params': new_multipart_params
-                });
+                if(this.type === 'getImgList_addBanner'){
+                    up.setOption({
+                        // 'drop_element':this.dropBtn,
+                        'url': this.host,
+                        'multipart_params': new_multipart_params,
+                    });
+                } else {
+                    up.setOption({
+                        'url': this.host,
+                        'multipart_params': new_multipart_params
+                    });
+                }
 
                 up.start();
             },
@@ -151,40 +174,48 @@
                     runtimes : 'html5,flash,silverlight,html4',
                     browse_button : this.browse_button,
                     url : 'http://oss.aliyuncs.com',
-                    filters: {
-                        mime_types : [ //只允许上传图片和zip文件
-                            { title : "Image files", extensions : "jpg,gif,png" },
-                            { title : "Zip files", extensions : "zip" }
-                        ],
-                        max_file_size : '100mb', //最大只能上传400kb的文件
-                        prevent_duplicates : true //不允许选取重复文件
-                    },
+                    max_file_size : '100mb', //最大只能上传10mb的文件
                     init: {
                         FilesAdded: function(up, files) {
-                            that.fileLen += files.length;
-                            if(that.fileLen <=9){
-                                that.check_object_radio();
-                                that.get_dirname();
+                            that.$request.apiAxiosHasBaseUrl('get','cmsApp/content/getSign',{},{
+                                token:that.token
+                            },false).then((request) => {
+                                let requestData = request.data;
+                                that.accessid = requestData.accessid;
+                                that.signature = requestData.signature;
+                                that.policyBase64 = requestData.policy;
+                                that.host = requestData.host;
+                                that.g_object_name = requestData.dir;
+                                that.callbackbody = requestData.callback;
+                                that.parames = {
+                                    'key' : requestData.dir,
+                                    'policy':requestData.policy,
+                                    'OSSAccessKeyId':requestData.accessid,
+                                    'success_action_status' : '200', //让服务端返回200,不然，默认会返回204
+                                    'callback': requestData.callback,
+                                    'signature': requestData.signature,
+                                    'host':requestData.host
+                                };
                                 up.start();
-                            }else{
-                                up.stop();
-                            }
+                            })
                         },
                         BeforeUpload: function(up, file) {
+                            that.check_object_radio();
+                            that.get_dirname();
                             that.set_upload_param(up, file.name, true);
                         },
                         UploadProgress: function(up, file) {},
                         FileUploaded: function(up, file, info) {
                             if (info.status == 200){
                                 let fileName = that.get_uploaded_object_name(file.name);
-                                that.$emit(`'getImgList_'${this.type}`,{imgUrl:`${that.parames.host}/${fileName}`,fileLen:that.fileLen});
+                                that.$emit(that.type,{imgUrl:`${that.parames.host}/${fileName}`,fileLen:that.fileLen,fileName:fileName,name:file.name,size:file.size});
                             }else if (info.status == 203){
                                 console.log(info.response)
                             }
                         },
                         Error: function(up, err) {
                             if (err.code == -600) {
-                                console.log("选择的文件太大了,可以根据应用情况，在upload.js 设置一下上传的最大大小");
+                                console.log("选择的文件太大了或文件为空,可以根据应用情况，在upload.js 调整设置");
                             }
                             else if (err.code == -601) {
                                 console.log("选择的文件后缀不对,可以根据应用情况，在upload.js进行设置可允许的上传文件类型");
@@ -197,9 +228,10 @@
                         }
                     }
                 });
-
                 this.uploader.init();
-                this.set_upload_param(this.uploader, '', false);
+                if(this.type === 'getImgList_addBanner') {
+                    this.$emit('getUploader', this.uploader)
+                }
             }
         }
     }
